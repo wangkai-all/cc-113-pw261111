@@ -1,0 +1,15 @@
+{
+  "name": "region-privacy-budget",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "受差分隐私预算约束的地区人数统计原型",
+  "engines": {
+    "node": ">=22.5"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "generate:sample": "node scripts/generate-sample.js",
+    "test": "node --test tests/*.test.js"
+  }
+}

@@ -1,0 +1,478 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>地区人数 · 隐私预算统计原型</title>
+  <link rel="stylesheet" href="./styles.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='4' fill='%232a78d6'/%3E%3C/svg%3E" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <span class="brand-title">地区人数 · 隐私预算统计</span>
+        <span class="brand-sub" id="brand-sub">固定人员样本原型</span>
+      </div>
+      <div class="topbar-spacer"></div>
+      <span class="badge" id="lock-badge" title="数据与规则锁定状态">
+        <span class="dot" id="lock-badge-dot"></span><span id="lock-badge-text">读取中</span>
+      </span>
+      <button class="theme-toggle" id="theme-toggle" type="button" aria-label="切换深浅主题">主题</button>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <div class="page-head">
+      <h1 class="page-title">按地区统计人数，并为一整份人员样本设定隐私预算</h1>
+      <p class="page-lede">
+        这份原型只开放<strong>项目内固定人员样本</strong>的“单地区人数”查询。每人先按明确规则保留
+        <strong>一条</strong>有效地区记录，页面完整展示去重与剔除过程；查询结果由拉普拉斯机制加噪返回，
+        每次执行都要先成功扣减预算。相同规范化查询与相同额度重复提交时，直接返回已保存的噪声结果。
+      </p>
+      <div class="lock-strip" id="lock-strip">
+        <span class="dot" id="lock-strip-dot" style="background: var(--status-warning)"></span>
+        <span id="lock-strip-text">正在读取锁定状态…</span>
+        <span class="mono" id="lock-strip-hash" hidden></span>
+        <button class="chip-btn" type="button" id="lock-strip-action" hidden>去确认锁定</button>
+      </div>
+    </div>
+
+    <section class="kpi-row" aria-label="预算与样本概览">
+      <div class="stat hero">
+        <div>
+          <div class="stat-label">剩余隐私预算</div>
+          <div class="hero-value" id="kpi-remaining">—<span class="unit">ε</span></div>
+        </div>
+        <div>
+          <div class="meter" id="budget-meter" style="--meter-fill: var(--series-1)">
+            <span id="budget-meter-fill" style="width: 0%"></span>
+          </div>
+          <div class="meter-legend">
+            <span id="kpi-spent">已用 —</span>
+            <span id="kpi-total">总额 —</span>
+          </div>
+        </div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">样本人数</div>
+        <div class="stat-value" id="kpi-people">—<span class="unit">人</span></div>
+        <div class="stat-note" id="kpi-people-note">固定样本，不随请求变化</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">保留有效地区记录</div>
+        <div class="stat-value" id="kpi-kept">—<span class="unit">人</span></div>
+        <div class="stat-note" id="kpi-kept-note">每人恰好 0 或 1 条</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">查询计数</div>
+        <div class="stat-value" id="kpi-queries">—<span class="unit">次</span></div>
+        <div class="stat-note" id="kpi-queries-note">成功执行与重放合计</div>
+      </div>
+    </section>
+
+    <nav class="tabs" role="tablist" aria-label="页面分区">
+      <button class="tab" role="tab" id="tab-query" aria-selected="true" aria-controls="panel-query">查询</button>
+      <button class="tab" role="tab" id="tab-pipeline" aria-selected="false" aria-controls="panel-pipeline">数据处理</button>
+      <button class="tab" role="tab" id="tab-budget" aria-selected="false" aria-controls="panel-budget">预算与流水</button>
+      <button class="tab" role="tab" id="tab-history" aria-selected="false" aria-controls="panel-history">历史查询</button>
+      <button class="tab" role="tab" id="tab-truth" aria-selected="false" aria-controls="panel-truth">真值对照</button>
+      <button class="tab" role="tab" id="tab-about" aria-selected="false" aria-controls="panel-about">机制与边界</button>
+    </nav>
+
+    <!-- 查询 -->
+    <section class="panel active" role="tabpanel" id="panel-query" aria-labelledby="tab-query">
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-head">
+            <h2 class="card-title">提交一次地区人数查询</h2>
+            <span class="badge" id="query-contract-badge">laplace · ε-DP</span>
+          </div>
+          <p class="card-lede">
+            每个选中的地区是独立的一次计数查询；提交的费用 = 地区数 × 每次额度。
+            扣减成功后才抽样并返回结果。
+          </p>
+
+          <div class="field">
+            <div class="label">选择地区 <span class="req">*</span></div>
+            <div class="region-tools">
+              <button class="chip-btn" type="button" id="region-select-some">选择 3 个示例地区</button>
+              <button class="chip-btn" type="button" id="region-clear">清空</button>
+              <span class="hint" id="region-count-hint">未选择</span>
+            </div>
+            <div class="region-groups" id="region-groups"></div>
+          </div>
+
+          <div class="field">
+            <label class="label" for="epsilon-input">每个地区消耗的额度 ε <span class="req">*</span></label>
+            <input class="input" id="epsilon-input" type="number" inputmode="decimal"
+              min="0.000001" step="any" placeholder="例如 0.5" autocomplete="off" />
+            <div class="hint">噪声尺度 ns = 1 / ε。额度越小，噪声越大、消耗越省。</div>
+          </div>
+
+          <div class="cost-line">
+            <span id="cost-formula">费用 = 地区数 × 额度</span>
+            <span class="money" id="cost-value">— ε</span>
+          </div>
+
+          <div class="btn-row">
+            <button class="btn" type="button" id="submit-query">提交并扣减预算</button>
+            <span class="hint" id="budget-gate-hint"></span>
+          </div>
+          <div class="notice" id="query-notice" role="status"></div>
+        </div>
+
+        <div class="stack">
+          <div class="card" id="result-card">
+            <div class="card-head">
+              <h2 class="card-title">查询结果</h2>
+              <span class="badge" id="result-origin-badge" style="display:none"></span>
+            </div>
+            <div id="result-placeholder" class="empty">提交成功后，这里显示每个地区的原始带噪值与展示值。</div>
+            <div id="result-body" hidden>
+              <div class="result-head">
+                <span class="result-title" id="result-title">—</span>
+                <span class="hint" id="result-meta"></span>
+              </div>
+              <div class="table-wrap">
+                <table class="data" id="result-table">
+                  <thead>
+                    <tr>
+                      <th>地区</th>
+                      <th class="num">原始带噪值 raw</th>
+                      <th class="num">展示值 max(0, raw)</th>
+                      <th class="num">非负处理抬升</th>
+                    </tr>
+                  </thead>
+                  <tbody id="result-tbody"></tbody>
+                </table>
+              </div>
+              <p class="table-caption" id="result-caption"></p>
+              <div class="notice warn show" id="clamp-notice" style="margin-top:10px">
+                展示值做了非负处理：<strong>max(0, raw)</strong> 会把负噪声折叠到 0，
+                因而改变结果分布、使期望偏高约 ns/2。原始带噪值另存一列，对照查看时不要混用。
+              </div>
+            </div>
+          </div>
+          <div class="card tight" id="query-aside">
+            <div class="card-head">
+              <h3 class="card-title">本次提交会发生什么</h3>
+            </div>
+            <ol class="rule-steps">
+              <li>地区集合与额度被归一化为查询身份；地区名称和勾选顺序不参与身份。</li>
+              <li>若身份此前已成功，直接返回保存的噪声结果，不再抽样、不再扣费。</li>
+              <li>否则在事务内校验剩余预算并扣减整笔费用；失败则不扣费。</li>
+              <li>扣减成功后执行拉普拉斯抽样，原始值与展示值分别写入记录。</li>
+            </ol>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 数据处理 -->
+    <section class="panel" role="tabpanel" id="panel-pipeline" aria-labelledby="tab-pipeline">
+      <div class="card" id="lock-card" style="margin-bottom:18px">
+        <div class="card-head">
+          <h2 class="card-title">确认数据与贡献规则，然后锁定</h2>
+          <span class="badge" id="lock-card-badge">未锁定</span>
+        </div>
+        <p class="card-lede">
+          锁定哈希覆盖整份人员样本、固定地区表与上面的贡献规则、以及查询契约。
+          锁定写入后不可覆盖：之后任何改名、复制或替换数据的尝试都会在启动时被拒绝，
+          已有预算、流水与查询历史保持原样。锁定前不能提交查询。
+        </p>
+        <div id="lock-pending-rows" style="margin-top:10px"></div>
+        <div class="admin-line">
+          <div class="field">
+            <label class="label" for="lock-admin-token">管理员令牌</label>
+            <input class="input" id="lock-admin-token" type="password" autocomplete="off"
+              placeholder="演示默认：demo-admin-token" />
+          </div>
+          <button class="btn" type="button" id="confirm-lock">确认并锁定</button>
+        </div>
+        <div class="notice" id="lock-notice" role="status"></div>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-head">
+            <h2 class="card-title">从原始记录到可计数记录</h2>
+            <span class="badge blue" id="rule-version-badge">规则 —</span>
+          </div>
+          <p class="card-lede" id="rule-lede"></p>
+          <ol class="rule-steps" id="rule-steps"></ol>
+          <div class="priority-list" id="priority-list"></div>
+          <div class="split-stats" id="removal-stats"></div>
+          <p class="table-caption">
+            仅展示各类处理分支的代表样本，不改动整份数据；计数使用完整样本。
+          </p>
+        </div>
+        <div class="card">
+          <div class="card-head">
+            <h2 class="card-title">逐阶段人数</h2>
+            <span class="card-note">按原始记录条与人头两种口径</span>
+          </div>
+          <div class="chart" id="funnel-chart"></div>
+          <p class="table-caption" id="funnel-caption"></p>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:18px">
+        <div class="card-head">
+          <h2 class="card-title">代表样本：每条记录的去向</h2>
+          <span class="card-note">保留行高亮；其余标注剔除、合并或被替换的原因</span>
+        </div>
+        <div class="preview-list" id="preview-list"></div>
+      </div>
+    </section>
+
+    <!-- 预算 -->
+    <section class="panel" role="tabpanel" id="panel-budget" aria-labelledby="tab-budget">
+      <div class="grid-2">
+        <div class="card budget-setup">
+          <div class="card-head">
+            <h2 class="card-title">管理员设置总 epsilon</h2>
+            <span class="badge" id="budget-state-badge">未设置</span>
+          </div>
+          <p class="card-lede">
+            总预算只设置一次：一旦产生成功查询扣费，总量即封存，不能通过改名、复制查询或换页面重置。
+          </p>
+          <div class="field">
+            <label class="label" for="admin-token">管理员令牌</label>
+            <input class="input" id="admin-token" type="password" autocomplete="off"
+              placeholder="演示默认：demo-admin-token" />
+            <div class="hint">令牌仅用于本原型区分设置预算与提交查询，不是完整身份认证方案。</div>
+          </div>
+          <div class="admin-line">
+            <div class="field">
+              <label class="label" for="total-epsilon">总预算 ε</label>
+              <input class="input" id="total-epsilon" type="number" inputmode="decimal"
+                min="0.000001" step="any" placeholder="例如 10" autocomplete="off" />
+            </div>
+            <button class="btn" type="button" id="save-total">设置总预算</button>
+          </div>
+          <div class="notice" id="budget-notice" role="status"></div>
+        </div>
+
+        <div class="stack">
+          <div class="card">
+            <div class="card-head">
+              <h2 class="card-title">预算状态</h2>
+              <span class="card-note" id="budget-version-note"></span>
+            </div>
+            <div class="ledger-summary" id="budget-summary"></div>
+            <div class="meter" style="margin-top:16px">
+              <span id="budget-meter-fill-2" style="width:0%"></span>
+            </div>
+            <div class="meter-legend">
+              <span id="budget-used-label">已用 —</span>
+              <span id="budget-total-label">总额 —</span>
+            </div>
+            <p class="table-caption" id="persistence-note">
+              预算、流水、查询历史保存在 SQLite 单文件中；重开程序后保持一致。
+            </p>
+          </div>
+          <div class="card tight">
+            <div class="card-head">
+              <h3 class="card-title">失败请求</h3>
+              <span class="card-note">不扣费，不计入流水</span>
+            </div>
+            <div id="attempt-list"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:18px">
+        <div class="card-head">
+          <h2 class="card-title">预算流水</h2>
+          <span class="card-note">每次成功扣费一条，含扣减前后余额</span>
+        </div>
+        <div class="table-wrap">
+          <table class="data" id="ledger-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>时间</th>
+                <th>地区</th>
+                <th class="num">每次额度</th>
+                <th class="num">本次扣费</th>
+                <th class="num">扣前</th>
+                <th class="num">扣后</th>
+                <th class="num">重放次数</th>
+              </tr>
+            </thead>
+            <tbody id="ledger-tbody"></tbody>
+          </table>
+        </div>
+        <p class="table-caption">
+          流水是扣费的唯一来源；查询结果被重放时不会新增流水。失败请求不产生任何扣减。
+        </p>
+      </div>
+    </section>
+
+    <!-- 历史 -->
+    <section class="panel" role="tabpanel" id="panel-history" aria-labelledby="tab-history">
+      <div class="card">
+        <div class="card-head">
+          <h2 class="card-title">已保存的查询</h2>
+          <span class="card-note" id="history-meta">—</span>
+        </div>
+        <p class="card-lede">
+          同一规范化查询 + 相同额度 = 同一行。重放次数表示该行被重复提交并直接返回保存结果的次数。
+        </p>
+        <div class="table-wrap">
+          <table class="data" id="history-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>时间</th>
+                <th>地区</th>
+                <th class="num">每次 ε</th>
+                <th class="num">总费用</th>
+                <th class="num">重放</th>
+                <th>查询指纹</th>
+              </tr>
+            </thead>
+            <tbody id="history-tbody"></tbody>
+          </table>
+        </div>
+        <p class="table-caption">
+          查询指纹只由样本、契约、规范化地区集合与规范化额度决定；换个名字、复制一条查询、改变勾选顺序都不会产生新的身份。
+        </p>
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <h2 class="card-title">被拒绝的请求</h2>
+          <span class="card-note">预算不足与格式错误都不扣费</span>
+        </div>
+        <div class="table-wrap">
+          <table class="data" id="attempts-table">
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>原因</th>
+                <th>地区数</th>
+                <th class="num">单次 ε</th>
+                <th class="num">请求总费用</th>
+                <th>说明</th>
+              </tr>
+            </thead>
+            <tbody id="attempts-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- 真值对照 -->
+    <section class="panel" role="tabpanel" id="panel-truth" aria-labelledby="tab-truth">
+      <div class="notice warn show" style="margin-bottom:16px">
+        <strong>这是独立的样本真值对照，不属于查询 API。</strong>
+        它不消耗预算、不写查询历史，也不经过噪声。真实部署不应向查询用户展示真值；这里只用于理解噪声误差的量级。
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-head">
+            <h2 class="card-title">保留记录后的地区人数真值</h2>
+            <span class="card-note" id="truth-note"></span>
+          </div>
+          <div class="bar-chart" id="truth-chart"></div>
+          <p class="table-caption" id="truth-chart-caption"></p>
+        </div>
+        <div class="stack">
+          <div class="card">
+            <div class="card-head">
+              <h3 class="card-title">怎么读误差</h3>
+            </div>
+            <ol class="rule-steps">
+              <li>真值是“每人保留一条记录”之后的人数，不是原始记录条数。</li>
+              <li>查询返回的 raw 加噪值 = 真值 + 拉普拉斯噪声，尺度 ns = 1/ε。</li>
+              <li>约 95% 的拉普拉斯噪声落在 ±3·ns 内；ns=2 时单次误差常有数人。</li>
+              <li>展示值 max(0, raw) 在真值较小、ns 较大时更容易被抬到 0 附近。</li>
+              <li>每次重放返回同一条保存结果，因此误差不会因刷新而变化。</li>
+            </ol>
+          </div>
+          <div class="card tight">
+            <div class="card-head">
+              <h3 class="card-title">整体摘要</h3>
+            </div>
+            <div class="ledger-summary" id="truth-summary"></div>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <h2 class="card-title">逐地区真值表</h2>
+          <span class="card-note">按地区表顺序，不做排名着色</span>
+        </div>
+        <div class="table-wrap">
+          <table class="data" id="truth-table">
+            <thead>
+              <tr><th>地区代码</th><th>地区</th><th>大区</th><th class="num">人数</th></tr>
+            </thead>
+            <tbody id="truth-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- 机制与边界 -->
+    <section class="panel" role="tabpanel" id="panel-about" aria-labelledby="tab-about">
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-head">
+            <h2 class="card-title">这个原型覆盖的机制</h2>
+            <span class="badge blue" id="about-contract-version">—</span>
+          </div>
+          <p class="card-lede" id="about-claim"></p>
+          <div class="mech-grid" id="about-mech-grid"></div>
+        </div>
+        <div class="card">
+          <div class="card-head">
+            <h2 class="card-title">锁定信息</h2>
+            <span class="badge good"><span class="dot"></span>不可改名重置</span>
+          </div>
+          <p class="card-lede">
+            锁定哈希覆盖整份样本、地区表与贡献规则、以及查询契约。任何替换都会在启动时被拒绝，
+            已有预算与流水保持原样。
+          </p>
+          <div id="about-lock-rows"></div>
+          <div class="notice warn show" style="margin-top:14px">
+            已有预算记录时，换个目录名、复制一份 HTML 或改请求里的地区名称，都不会创建新的预算。
+            本原型的信任锚就是这份 SQLite 文件本身。
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2 class="card-title">明确的边界：这不是通用隐私保障系统</h2>
+        </div>
+        <p class="card-lede">
+          下面每一条都是当前实现的真实约束；把它们当作“原型能做什么”的完整清单，
+          而不是营销式的免责声明。
+        </p>
+        <ol class="boundary-list" id="boundary-list"></ol>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2 class="card-title">噪声与展示处理的口径</h2>
+        </div>
+        <div class="mech-grid" id="transform-mech"></div>
+        <p class="table-caption">
+          两条记录字段同时写入：<code>raw_noisy</code> 是机制输出；<code>display_value</code>
+          是界面展示用的 max(0, raw)。后者影响结果分布，不等同于“更准的噪声”。
+        </p>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <span>地区人数隐私预算统计原型 · 固定人员样本 · 本地 SQLite 持久化</span>
+      <span id="footer-instance">实例 —</span>
+    </footer>
+  </main>
+
+  <div class="tooltip" id="tooltip" role="tooltip" aria-hidden="true"></div>
+  <script src="./app.js" type="module"></script>
+</body>
+</html>
